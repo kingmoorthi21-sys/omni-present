@@ -1,0 +1,10 @@
+@media (max-width: 991.98px) {
+    .navbar-brand img {
+        height: 35px !important;
+    }
+
+    .hero-bg {
+        background-position: center right !important;
+    }
+
+}
