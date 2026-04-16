@@ -73,6 +73,7 @@ body {
 img {
     max-width: 100%;
     display: block;
+        height: auto;
 }
 
 a {
@@ -1176,6 +1177,16 @@ transition: all 0.9s;
 
 .why-list i {
     color: var(--orange);
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* industries */
