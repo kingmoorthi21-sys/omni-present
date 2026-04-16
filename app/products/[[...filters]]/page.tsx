@@ -164,20 +164,26 @@ function RangeSlider({
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '11px', color: 'var(--muted)', marginBottom: '4px', fontFamily: 'Magistral-Book' }}>MIN</div>
-          <input
-            type="number" value={min} min={globalMin} max={max - 1}
-            onChange={e => onChange(Math.min(Number(e.target.value), max - 1), max)}
-            style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '14px', fontFamily: 'Magistral-Book', outline: 'none', textAlign: 'center' }}
-          />
+          <div style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)', fontSize: '14px' }}>$</span>
+            <input
+              type="number" value={min} min={globalMin} max={max - 1}
+              onChange={e => onChange(Math.min(Number(e.target.value), max - 1), max)}
+              style={{ width: '100%', padding: '8px 10px 8px 22px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '14px', fontFamily: 'Magistral-Book', outline: 'none', textAlign: 'center' }}
+            />
+          </div>
         </div>
         <span style={{ color: 'var(--muted)', marginTop: '16px' }}>—</span>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '11px', color: 'var(--muted)', marginBottom: '4px', fontFamily: 'Magistral-Book' }}>MAX</div>
-          <input
-            type="number" value={max} min={min + 1} max={globalMax}
-            onChange={e => onChange(min, Math.max(Number(e.target.value), min + 1))}
-            style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '14px', fontFamily: 'Magistral-Book', outline: 'none', textAlign: 'center' }}
-          />
+          <div style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)', fontSize: '14px' }}>$</span>
+            <input
+              type="number" value={max} min={min + 1} max={globalMax}
+              onChange={e => onChange(min, Math.max(Number(e.target.value), min + 1))}
+              style={{ width: '100%', padding: '8px 10px 8px 22px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '14px', fontFamily: 'Magistral-Book', outline: 'none', textAlign: 'center' }}
+            />
+          </div>
         </div>
       </div>
     </div>
