@@ -21,9 +21,9 @@ function BrandLogo({ brandName }: { brandName: string }) {
 }
 
 const ATTRIBUTES = [
-  { id: 32, name: 'Wheel Brand', slug: 'pa_wheel-brand', urlKey: 'brand' },
-  { id: 13, name: 'Wheel Model', slug: 'pa_wheel-model', urlKey: 'model' },
-  { id: 15, name: 'Wheel Size', slug: 'pa_wheel-size', urlKey: 'size' },
+  { id: 32, name: 'Wheel Brand', slug: 'pa_wheel-brand' },
+  { id: 13, name: 'Wheel Model', slug: 'pa_wheel-model' },
+  { id: 15, name: 'Wheel Size', slug: 'pa_wheel-size' },
 ];
 
 const SkeletonCard = () => (
@@ -39,7 +39,6 @@ const SkeletonCard = () => (
   </div>
 );
 
-// Parse price from URL: "500-1000" -> { min: 500, max: 1000 }
 function parsePrice(priceStr: string) {
   const parts = priceStr.split('-');
   return { min: parts[0] || '', max: parts[1] || '' };
@@ -50,7 +49,6 @@ export default function ProductsPage() {
   const router = useRouter();
   const filters = (params?.filters as string[]) || [];
 
-  // Parse URL segments: [brand, model, size, price]
   const brandSlug = filters[0] || '';
   const modelSlug = filters[1] || '';
   const sizeSlug = filters[2] || '';
@@ -62,75 +60,98 @@ export default function ProductsPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const [attributeTerms, setAttributeTerms] = useState<Record<number, any[]>>({});
+
+  const [brandTerms, setBrandTerms] = useState<any[]>([]);
+  const [modelTerms, setModelTerms] = useState<any[]>([]);
+  const [sizeTerms, setSizeTerms] = useState<any[]>([]);
+  const [termsLoaded, setTermsLoaded] = useState(false);
+
   const [termIds, setTermIds] = useState<Record<string, string>>({});
   const [minPrice, setMinPrice] = useState(urlMin);
   const [maxPrice, setMaxPrice] = useState(urlMax);
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
 
-  // Load attribute terms
+  // Step 1 — Brand + Size terms oru thadavai load pannuvom
   useEffect(() => {
-    ATTRIBUTES.forEach(attr => {
-      fetch(`/api/attributes?id=${attr.id}`)
-        .then(res => res.json())
-        .then(data => setAttributeTerms(prev => ({ ...prev, [attr.id]: data })));
+    Promise.all([
+      fetch(`/api/attributes?id=32`).then(r => r.json()),
+      fetch(`/api/attributes?id=15`).then(r => r.json()),
+    ]).then(([brands, sizes]) => {
+      setBrandTerms(brands);
+      setSizeTerms(sizes);
     });
   }, []);
 
-  // Resolve slugs to term IDs
+  // Step 2 — Model terms: brand select pannina related models, illana all models
   useEffect(() => {
-    const resolveSlug = async (attrSlug: string, termSlug: string, attrId: number) => {
-      if (!termSlug) return;
-      const res = await fetch(`/api/attributes?id=${attrId}`);
-      const terms = await res.json();
-      const term = terms.find((t: any) => t.slug === termSlug);
-      if (term) setTermIds(prev => ({ ...prev, [attrSlug]: term.id }));
-    };
-    if (brandSlug) resolveSlug('pa_wheel-brand', brandSlug, 32);
-    if (modelSlug) resolveSlug('pa_wheel-model', modelSlug, 13);
-    if (sizeSlug) resolveSlug('pa_wheel-size', sizeSlug, 15);
-  }, [brandSlug, modelSlug, sizeSlug]);
+    if (!brandTerms.length) return;
 
-  // Brand change aana — related models fetch pannuvom
-useEffect(() => {
-  if (!brandSlug) {
-    // Brand illana — all models show pannuvom
-    fetch(`/api/attributes?id=13`)
-      .then(res => res.json())
-      .then(data => setAttributeTerms(prev => ({ ...prev, 13: data })));
-    return;
-  }
-
-  // Brand term ID find pannuvom
-  fetch(`/api/attributes?id=32`)
-    .then(res => res.json())
-    .then(terms => {
-      const brandTerm = terms.find((t: any) => t.slug === brandSlug);
-      if (!brandTerm) return;
-
-      // Brand related products fetch → unique models get pannuvom
-      fetch(`/api/products?per_page=100&brand_term=${brandTerm.id}&_fields=attributes`)
+    if (termIds['pa_wheel-brand']) {
+      fetch(`/api/attributes?id=13&brand_term=${termIds['pa_wheel-brand']}`)
         .then(res => res.json())
         .then(data => {
-          const modelNames = new Set<string>();
-          (data.products || []).forEach((p: any) => {
-            const modelAttr = p.attributes?.find((a: any) => a.slug === 'pa_wheel-model');
-            modelAttr?.options?.forEach((o: string) => modelNames.add(o));
-          });
-
-          // Model terms filter pannuvom
-          fetch(`/api/attributes?id=13`)
-            .then(res => res.json())
-            .then(allModels => {
-              const filtered = allModels.filter((m: any) => modelNames.has(m.name));
-              setAttributeTerms(prev => ({ ...prev, 13: filtered }));
-            });
+          setModelTerms(data);
+          setTermsLoaded(true);
         });
-    });
-}, [brandSlug]);
+    } else {
+      fetch(`/api/attributes?id=13`)
+        .then(res => res.json())
+        .then(data => {
+          setModelTerms(data);
+          setTermsLoaded(true);
+        });
+    }
+  }, [termIds['pa_wheel-brand'], brandTerms.length]);
 
-  // Build URL path
+  // Step 3 — URL slugs → term IDs resolve pannuvom
+  useEffect(() => {
+    if (!brandTerms.length || !sizeTerms.length) return;
+
+    const newIds: Record<string, string> = {};
+
+    if (brandSlug) {
+      const t = brandTerms.find((t: any) => t.slug === brandSlug);
+      if (t) newIds['pa_wheel-brand'] = String(t.id);
+    }
+    if (sizeSlug) {
+      const t = sizeTerms.find((t: any) => t.slug === sizeSlug);
+      if (t) newIds['pa_wheel-size'] = String(t.id);
+    }
+
+    setTermIds(prev => ({ ...prev, ...newIds }));
+  }, [brandSlug, sizeSlug, brandTerms, sizeTerms]);
+
+  // Model slug resolve — modelTerms load aana appuram
+  useEffect(() => {
+    if (!modelTerms.length || !modelSlug) return;
+    const t = modelTerms.find((t: any) => t.slug === modelSlug);
+    if (t) setTermIds(prev => ({ ...prev, 'pa_wheel-model': String(t.id) }));
+  }, [modelSlug, modelTerms]);
+
+  // Step 4 — Products fetch — terms load aana appuram மட்டும்
+  useEffect(() => {
+    if (!termsLoaded) return;
+
+    setLoading(true);
+    let url = `/api/products?per_page=12&page=${page}&search=${query}`;
+    if (termIds['pa_wheel-brand']) url += `&brand_term=${termIds['pa_wheel-brand']}`;
+    if (termIds['pa_wheel-model']) url += `&model_term=${termIds['pa_wheel-model']}`;
+    if (termIds['pa_wheel-size']) url += `&size_term=${termIds['pa_wheel-size']}`;
+    if (urlMin) url += `&min_price=${urlMin}`;
+    if (urlMax) url += `&max_price=${urlMax}`;
+
+    fetch(url)
+      .then(res => res.json())
+      .then(data => {
+        setProducts(data.products || []);
+        setTotalPages(Number(data.totalPages));
+        setTotal(Number(data.total));
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [page, query, termIds, urlMin, urlMax, termsLoaded]);
+
   const buildURL = useCallback((brand: string, model: string, size: string, min: string, max: string) => {
     let path = '/products';
     if (brand) path += `/${brand}`;
@@ -139,30 +160,6 @@ useEffect(() => {
     if (min || max) path += `/${min || '0'}-${max || ''}`;
     return path;
   }, []);
-
-  // Fetch products
-  useEffect(() => {
-  setLoading(true);
-  let url = `/api/products?per_page=12&page=${page}&search=${query}`;
-
-  // Multiple filters — term IDs pass pannuvom
-  if (termIds['pa_wheel-brand']) url += `&brand_term=${termIds['pa_wheel-brand']}`;
-  if (termIds['pa_wheel-model']) url += `&model_term=${termIds['pa_wheel-model']}`;
-  if (termIds['pa_wheel-size']) url += `&size_term=${termIds['pa_wheel-size']}`;
-
-  if (urlMin) url += `&min_price=${urlMin}`;
-  if (urlMax) url += `&max_price=${urlMax}`;
-
-  fetch(url)
-    .then(res => res.json())
-    .then(data => {
-      setProducts(data.products || []);
-      setTotalPages(Number(data.totalPages));
-      setTotal(Number(data.total));
-      setLoading(false);
-    })
-    .catch(() => setLoading(false));
-}, [page, query, termIds, urlMin, urlMax]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -173,27 +170,42 @@ useEffect(() => {
 
   const clearFilters = () => {
     setMinPrice(''); setMaxPrice(''); setQuery(''); setSearch(''); setPage(1);
+    setTermIds({});
     router.push('/products');
   };
 
   const applyPrice = () => {
-    const newPath = buildURL(brandSlug, modelSlug, sizeSlug, minPrice, maxPrice);
-    router.push(newPath);
+    router.push(buildURL(brandSlug, modelSlug, sizeSlug, minPrice, maxPrice));
   };
 
   const handleAttrChange = (attrSlug: string, termSlug: string) => {
     setPage(1);
-    if (attrSlug === 'pa_wheel-brand') router.push(termSlug ? `/products/${termSlug}` : '/products');
-    if (attrSlug === 'pa_wheel-model') router.push(termSlug ? `/products/${brandSlug}/${termSlug}` : `/products/${brandSlug}`);
-    if (attrSlug === 'pa_wheel-size') router.push(termSlug ? `/products/${brandSlug}/${modelSlug}/${termSlug}` : `/products/${brandSlug}/${modelSlug}`);
+    if (attrSlug === 'pa_wheel-brand') {
+      setTermIds({});
+      setModelTerms([]);
+      setTermsLoaded(false);
+      router.push(termSlug ? `/products/${termSlug}` : '/products');
+    }
+    if (attrSlug === 'pa_wheel-model') {
+      router.push(termSlug ? `/products/${brandSlug}/${termSlug}` : `/products/${brandSlug}`);
+    }
+    if (attrSlug === 'pa_wheel-size') {
+      router.push(termSlug ? `/products/${brandSlug}/${modelSlug}/${termSlug}` : `/products/${brandSlug}/${modelSlug}`);
+    }
   };
 
-  // Get current selected term slug for each attribute
   const getSelectedSlug = (attrSlug: string) => {
     if (attrSlug === 'pa_wheel-brand') return brandSlug;
     if (attrSlug === 'pa_wheel-model') return modelSlug;
     if (attrSlug === 'pa_wheel-size') return sizeSlug;
     return '';
+  };
+
+  const getTerms = (attrSlug: string) => {
+    if (attrSlug === 'pa_wheel-brand') return brandTerms;
+    if (attrSlug === 'pa_wheel-model') return modelTerms;
+    if (attrSlug === 'pa_wheel-size') return sizeTerms;
+    return [];
   };
 
   const selectStyle: React.CSSProperties = {
@@ -205,7 +217,6 @@ useEffect(() => {
 
   const hasFilters = brandSlug || modelSlug || sizeSlug || urlMin || urlMax || query;
 
-  // Breadcrumb
   const breadcrumbs = [
     { label: 'All Products', href: '/products' },
     ...(brandSlug ? [{ label: brandSlug.replace(/-/g, ' '), href: `/products/${brandSlug}` }] : []),
@@ -217,7 +228,6 @@ useEffect(() => {
     <>
       <Header />
 
-      {/* HERO */}
       <section style={{
         background: 'linear-gradient(135deg, #111 0%, #2a1a0e 100%)',
         minHeight: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -247,18 +257,20 @@ useEffect(() => {
         <div className="container-xl">
 
           {/* BREADCRUMB */}
-          <div style={{ marginBottom: '24px', fontSize: '13px', color: 'var(--muted)', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {breadcrumbs.map((crumb, i) => (
-              <span key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {i > 0 && <i className="bi bi-chevron-right" style={{ fontSize: '11px' }}></i>}
-                {i === breadcrumbs.length - 1 ? (
-                  <span style={{ color: 'var(--orange)', fontFamily: 'Magistral-Medium', textTransform: 'capitalize' }}>{crumb.label}</span>
-                ) : (
-                  <a href={crumb.href} style={{ color: 'var(--muted)', textDecoration: 'none', textTransform: 'capitalize' }}>{crumb.label}</a>
-                )}
-              </span>
-            ))}
-          </div>
+          {breadcrumbs.length > 1 && (
+            <div style={{ marginBottom: '24px', fontSize: '13px', color: 'var(--muted)', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {breadcrumbs.map((crumb, i) => (
+                <span key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {i > 0 && <i className="bi bi-chevron-right" style={{ fontSize: '11px' }}></i>}
+                  {i === breadcrumbs.length - 1 ? (
+                    <span style={{ color: 'var(--orange)', fontFamily: 'Magistral-Medium', textTransform: 'capitalize' }}>{crumb.label}</span>
+                  ) : (
+                    <a href={crumb.href} style={{ color: 'var(--muted)', textDecoration: 'none', textTransform: 'capitalize' }}>{crumb.label}</a>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
 
           <div className="row g-4">
 
@@ -276,26 +288,31 @@ useEffect(() => {
                   )}
                 </div>
 
-                {/* ATTRIBUTE FILTERS */}
                 {ATTRIBUTES.map(attr => (
                   <div key={attr.id} style={{ marginBottom: '20px' }}>
                     <label style={{ display: 'block', fontSize: '13px', fontFamily: 'Magistral-Medium', color: 'var(--text)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       {attr.name}
                     </label>
                     <select
-                      style={{ ...selectStyle, borderColor: getSelectedSlug(attr.slug) ? 'var(--orange)' : 'var(--border)' }}
-                      value={getSelectedSlug(attr.slug)}
-                      onChange={e => handleAttrChange(attr.slug, e.target.value)}
-                    >
+  style={{ 
+    ...selectStyle, 
+    borderColor: getSelectedSlug(attr.slug) ? 'var(--orange)' : 'var(--border)',
+    opacity: attr.slug === 'pa_wheel-model' && !brandSlug ? 0.5 : 1,
+    cursor: attr.slug === 'pa_wheel-model' && !brandSlug ? 'not-allowed' : 'pointer',
+  }}
+  value={getSelectedSlug(attr.slug)}
+  onChange={e => handleAttrChange(attr.slug, e.target.value)}
+  disabled={attr.slug === 'pa_wheel-model' && !brandSlug}
+>
                       <option value="">All</option>
-                      {(attributeTerms[attr.id] || []).map((term: any) => (
+                      {getTerms(attr.slug).map((term: any) => (
                         <option key={term.id} value={term.slug}>{term.name}</option>
                       ))}
                     </select>
                   </div>
                 ))}
 
-                {/* PRICE FILTER */}
+                {/* PRICE */}
                 <div style={{ marginBottom: '20px' }}>
                   <label style={{ display: 'block', fontSize: '13px', fontFamily: 'Magistral-Medium', color: 'var(--text)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Price Range
@@ -318,10 +335,9 @@ useEffect(() => {
                   )}
                 </div>
 
-                {/* ACTIVE URL */}
                 {hasFilters && (
-                  <div style={{ background: 'var(--orange-tint)', border: '1px solid var(--orange-border)', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: 'var(--orange)', wordBreak: 'break-all' }}>
-                    <i className="bi bi-link-45deg" style={{ marginRight: '4px' }}></i>
+                  <div style={{ background: 'var(--orange-tint)', border: '1px solid var(--orange-border)', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: 'var(--orange)' }}>
+                    <i className="bi bi-check-circle-fill" style={{ marginRight: '4px' }}></i>
                     {total} products found
                   </div>
                 )}
