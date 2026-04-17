@@ -210,12 +210,25 @@ export default function ProductDetailPage() {
   const [activeImg,  setActiveImg]  = useState(0);
   const [lightbox,   setLightbox]   = useState<number | null>(null);
   const [showEnquiry, setShowEnquiry] = useState(false);
+  const [brandLogo,  setBrandLogo]  = useState<string | null>(null);
 
   useEffect(() => {
     if (!slug) return;
     fetch(`/api/products?slug=${slug}`)
       .then(r => r.json())
-      .then(data => { setProduct(data.products?.[0] || null); setLoading(false); })
+      .then(data => {
+        const p = data.products?.[0] || null;
+        setProduct(p);
+        setLoading(false);
+        // Fetch brand logo
+        const brandName = p?.attributes?.find((a: any) => a.slug === 'pa_wheel-brand')?.options?.[0];
+        if (brandName) {
+          fetch(`/api/brand-logo?name=${encodeURIComponent(brandName)}`)
+            .then(r => r.json())
+            .then(d => setBrandLogo(d.logoUrl || null))
+            .catch(() => {});
+        }
+      })
       .catch(() => setLoading(false));
   }, [slug]);
 
@@ -355,6 +368,12 @@ export default function ProductDetailPage() {
 
             {/* RIGHT — Details */}
             <div className="col-lg-6">
+              {/* Brand Logo */}
+              {brandLogo && (
+                <div style={{ marginBottom: '16px' }}>
+                  <img src={brandLogo} alt="brand" style={{ height: '40px', width: 'auto', objectFit: 'contain' }} />
+                </div>
+              )}
               <h1 style={{ fontSize: '26px', fontFamily: 'Magistral-Medium', fontWeight: 'normal', marginBottom: '16px', lineHeight: 1.3 }}>
                 {product.name}
               </h1>
