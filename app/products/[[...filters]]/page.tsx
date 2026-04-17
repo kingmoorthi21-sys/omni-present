@@ -329,6 +329,7 @@ export default function ProductsPage() {
   // ── Fetch products ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!segmentsResolved) return;
+    if (!brandTerms.length || !sizeTerms.length) return; // wait for terms
 
     const controller = new AbortController();
     setLoading(true);
@@ -371,7 +372,7 @@ export default function ProductsPage() {
       .catch(err => { if (err.name !== 'AbortError') setLoading(false); });
 
     return () => controller.abort();
-  }, [brandSlug, modelSlug, sizeSlug, activeMin, activeMax, currentPage, segmentsResolved]); // eslint-disable-line
+  }, [brandSlug, modelSlug, sizeSlug, activeMin, activeMax, currentPage, segmentsResolved, brandTerms.length, sizeTerms.length]); // eslint-disable-line
 
   // ── Dynamic SEO titles ───────────────────────────────────────────────────
   const brandName  = brandTerms.find(t => t.slug === brandSlug)?.name  || '';

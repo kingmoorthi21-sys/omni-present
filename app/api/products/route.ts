@@ -36,10 +36,8 @@ export async function GET(request: Request) {
   const modelTerm = searchParams.get('model_term') || '';
   const sizeTerm  = searchParams.get('size_term')  || '';
 
-  // ── No attribute filters → fast brand showcase (only when no price filter) ──
+  // ── No attribute filters → simple paginated query with per-brand diversity ──
   if (!brandTerm && !modelTerm && !sizeTerm && !slug && !min_price && !max_price) {
-    const SHOW = 16;
-
     // Fetch all brand terms (cached 1hr)
     const brandsRes = await fetch(
       `${WC_URL}/wp-json/wc/v3/products/attributes/32/terms?consumer_key=${WC_KEY}&consumer_secret=${WC_SECRET}&per_page=100&orderby=count&order=desc`,
@@ -48,54 +46,73 @@ export async function GET(request: Request) {
     const allBrands: any[] = await brandsRes.json();
 
     if (!allBrands?.length) {
-      const url = `${baseOrdered()}&per_page=${SHOW}&page=${page}`;
+      const url = `${baseOrdered()}&per_page=${per_page}&page=${page}`;
       const res = await fetch(url, { cache: 'no-store' });
       const data = await res.json();
       return NextResponse.json({ products: data, total: res.headers.get('X-WP-Total') || '0', totalPages: res.headers.get('X-WP-TotalPages') || '1' });
     }
 
-    const brandCount = allBrands.length;
-    const startSlot  = (page - 1) * SHOW;
+    const SHOW        = per_page; // use requested per_page (36)
+    const brandCount  = allBrands.length;
+    const startSlot   = (page - 1) * SHOW;
 
-    // Group slots by brand+productPage to batch fetch
-    // Instead of 16 calls, fetch multiple products per brand in one call
-    const slotMap = new Map<string, { brand: any; pages: number[] }>();
-    for (let i = 0; i < SHOW; i++) {
+    // Each slot: which brand + which product offset within that brand
+    const slots = Array.from({ length: SHOW }, (_, i) => {
       const globalSlot  = startSlot + i;
       const brandIndex  = globalSlot % brandCount;
-      const productPage = Math.floor(globalSlot / brandCount) + 1;
-      const brand       = allBrands[brandIndex];
-      const key         = brand.id;
-      if (!slotMap.has(key)) slotMap.set(key, { brand, pages: [] });
-      slotMap.get(key)!.pages.push(productPage);
+      const productOffset = Math.floor(globalSlot / brandCount); // 0-based offset
+      return { brand: allBrands[brandIndex], offset: productOffset };
+    });
+
+    // Group by brand → fetch needed count per brand in one call
+    const brandNeeds = new Map<number, { brand: any; maxOffset: number }>();
+    for (const { brand, offset } of slots) {
+      const existing = brandNeeds.get(brand.id);
+      if (!existing || offset > existing.maxOffset) {
+        brandNeeds.set(brand.id, { brand, maxOffset: offset });
+      }
     }
 
-    // Fetch per brand — one call per brand, get needed products
-    const brandFetches = Array.from(slotMap.entries()).map(([, { brand, pages }]) => {
-      const maxPage   = Math.max(...pages);
-      const fetchCount = maxPage; // fetch up to maxPage products, pick the right ones
+    // Parallel fetch — one call per brand
+    const fetches = Array.from(brandNeeds.values()).map(({ brand, maxOffset }) => {
+      const count = Math.min(maxOffset + 1, brand.count || 999, 100);
       return fetch(
-        `${base()}&attribute=pa_wheel-brand&attribute_term=${brand.id}&per_page=${fetchCount}&page=1&orderby=id&order=asc`,
+        `${base()}&attribute=pa_wheel-brand&attribute_term=${brand.id}&per_page=${count}&page=1&orderby=id&order=asc`,
         { next: { revalidate: 600 } }
       )
         .then(r => r.json())
-        .then((products: any[]) => ({ brandId: brand.id, products: products || [] }))
-        .catch(() => ({ brandId: brand.id, products: [] }));
+        .then((prods: any[]) => [brand.id, Array.isArray(prods) ? prods : []] as [number, any[]])
+        .catch(() => [brand.id, []] as [number, any[]]);
     });
 
-    const brandResults = await Promise.all(brandFetches);
-    const brandProductMap = new Map(brandResults.map(r => [r.brandId, r.products]));
+    const fetched     = await Promise.all(fetches);
+    const brandMap    = new Map<number, any[]>(fetched);
 
-    // Reconstruct slots in order
+    // Reconstruct ordered results
     const ordered: any[] = [];
-    for (let i = 0; i < SHOW; i++) {
-      const globalSlot  = startSlot + i;
-      const brandIndex  = globalSlot % brandCount;
-      const productPage = Math.floor(globalSlot / brandCount) + 1;
-      const brand       = allBrands[brandIndex];
-      const products    = brandProductMap.get(brand.id) || [];
-      const product     = products[productPage - 1] || null;
-      if (product) ordered.push(product);
+    const usedIds = new Set<number>();
+
+    for (const { brand, offset } of slots) {
+      const prods   = brandMap.get(brand.id) || [];
+      const product = prods[offset] ?? null;
+      if (product && !usedIds.has(product.id)) {
+        ordered.push(product);
+        usedIds.add(product.id);
+      }
+    }
+
+    // Fill remaining slots with any unused products
+    if (ordered.length < SHOW) {
+      for (const [, prods] of brandMap) {
+        for (const p of prods) {
+          if (!usedIds.has(p.id)) {
+            ordered.push(p);
+            usedIds.add(p.id);
+            if (ordered.length >= SHOW) break;
+          }
+        }
+        if (ordered.length >= SHOW) break;
+      }
     }
 
     const totalCount = allBrands.reduce((sum: number, b: any) => sum + (b.count || 0), 0);
@@ -104,7 +121,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       products:   ordered,
       total:      String(totalCount),
-      totalPages: String(Math.min(totalPages, 2260)),
+      totalPages: String(Math.min(totalPages, 752)),
     });
   }
 
