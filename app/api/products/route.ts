@@ -136,7 +136,39 @@ export async function GET(request: Request) {
       });
     }
 
-    // Multiple attributes → intersection
+    // Multiple attributes → use most specific attribute as primary WC filter
+    // Model is always brand-specific, so model filter alone is sufficient
+    // Size is also specific enough for direct query
+    if (modelTerm && !sizeTerm) {
+      // Brand + Model: model term is already brand-specific, direct WC query
+      const url = `${baseOrdered()}&attribute=pa_wheel-model&attribute_term=${modelTerm}&per_page=${per_page}&page=${page}`;
+      const res = await fetch(url, { cache: 'no-store' });
+      const data = await res.json();
+      return NextResponse.json({
+        products:   data,
+        total:      res.headers.get('X-WP-Total')      || '0',
+        totalPages: res.headers.get('X-WP-TotalPages') || '1',
+      });
+    }
+
+    if (brandTerm && sizeTerm && !modelTerm) {
+      // Brand + Size: fetch by brand, filter size client-side (size terms overlap brands)
+      const idSetsBS: number[][] = [];
+      idSetsBS.push(await getIDsByAttribute('pa_wheel-brand', brandTerm));
+      idSetsBS.push(await getIDsByAttribute('pa_wheel-size',  sizeTerm));
+      let interBS = idSetsBS[0];
+      for (let i = 1; i < idSetsBS.length; i++) { const s = new Set(idSetsBS[i]); interBS = interBS.filter(id => s.has(id)); }
+      if (!interBS.length) return NextResponse.json({ products: [], total: '0', totalPages: '1' });
+      const totalBS      = interBS.length;
+      const totalPagesBS = Math.ceil(totalBS / per_page);
+      const pageIdsBS    = interBS.slice((page - 1) * per_page, page * per_page);
+      const urlBS = `${baseOrdered()}&include=${pageIdsBS.join(',')}&per_page=${per_page}`;
+      const resBS = await fetch(urlBS, { cache: 'no-store' });
+      const dataBS = await resBS.json();
+      return NextResponse.json({ products: dataBS, total: String(totalBS), totalPages: String(totalPagesBS) });
+    }
+
+    // Brand + Model + Size or other combos → intersection
     const idSets2: number[][] = [];
     if (brandTerm) idSets2.push(await getIDsByAttribute('pa_wheel-brand', brandTerm));
     if (modelTerm) idSets2.push(await getIDsByAttribute('pa_wheel-model', modelTerm));
