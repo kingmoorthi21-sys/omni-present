@@ -36,8 +36,8 @@ export async function GET(request: Request) {
   const modelTerm = searchParams.get('model_term') || '';
   const sizeTerm  = searchParams.get('size_term')  || '';
 
-  // ── No attribute filters → fast brand showcase ──────────────────────────────
-  if (!brandTerm && !modelTerm && !sizeTerm && !slug) {
+  // ── No attribute filters → fast brand showcase (only when no price filter) ──
+  if (!brandTerm && !modelTerm && !sizeTerm && !slug && !min_price && !max_price) {
     const SHOW = 16;
 
     // Fetch all brand terms (cached 1hr)
@@ -108,7 +108,7 @@ export async function GET(request: Request) {
     });
   }
 
-  // ── Price only (no attribute, no slug) ──────────────────────────────────────
+  // ── Price only (no attribute filters) ───────────────────────────────────────
   if (!brandTerm && !modelTerm && !sizeTerm) {
     let url = `${baseOrdered()}&per_page=${per_page}&page=${page}`;
     if (slug)      url += `&slug=${slug}`;
