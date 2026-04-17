@@ -339,7 +339,7 @@ export default function ProductsPage() {
 
     if ((brandSlug && !brandTerm) || (modelSlug && !modelTerm) || (sizeSlug && !sizeTerm)) return;
 
-    const fetchPerPage = '16';
+    const fetchPerPage = '36';
     const api = new URLSearchParams({ per_page: fetchPerPage, page: String(currentPage) });
     if (brandTerm) api.set('brand_term', String(brandTerm.id));
     if (modelTerm) api.set('model_term', String(modelTerm.id));
