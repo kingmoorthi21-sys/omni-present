@@ -8,7 +8,7 @@ import Footer from '@/components/Footer';
 // ── Brand logo — simple img tag, URL passed as prop ──────────────────────────
 function BrandLogo({ logoUrl, brandName }: { logoUrl: string | null; brandName: string }) {
   if (!logoUrl) return null;
-  return <img src={logoUrl} alt={brandName} style={{ height: '30px', width: 'auto', objectFit: 'contain', marginBottom: '12px' }} />;
+  return <img src={logoUrl} alt={brandName} style={{ height: '30px', width: 'auto', objectFit: 'contain', marginBottom: '8px' }} />;
 }
 
 // Fetch all brand logos once, cache globally
@@ -251,8 +251,22 @@ export default function ProductsPage() {
       .catch(() => {}); // keep defaults on error
   }, []);
 
-  // ── Load all attribute terms ────────────────────────────────────────────
+  // ── Load all attribute terms (session cached) ───────────────────────────
   useEffect(() => {
+    const cacheKey = 'wc_attr_terms_v1';
+    const cached = sessionStorage.getItem(cacheKey);
+
+    if (cached) {
+      try {
+        const { brands, models, sizes } = JSON.parse(cached);
+        setBrandTerms(brands);
+        setModelTerms(models);
+        setSizeTerms(sizes);
+        setTermsReady(true);
+        return;
+      } catch {}
+    }
+
     Promise.all([
       fetch('/api/attributes?id=32').then(r => r.json()),
       fetch('/api/attributes?id=13').then(r => r.json()),
@@ -262,6 +276,8 @@ export default function ProductsPage() {
       setModelTerms(models);
       setSizeTerms(sizes);
       setTermsReady(true);
+      // Cache in sessionStorage for this browser session
+      try { sessionStorage.setItem(cacheKey, JSON.stringify({ brands, models, sizes })); } catch {}
     });
   }, []);
 
@@ -634,7 +650,7 @@ export default function ProductsPage() {
                     const brandName = brandAttr?.options?.[0] || '';
                     const logoUrl   = logoMap[brandName] ?? null;
                     return (
-                      <div className="col-6 col-md-4 col-lg-4" key={product.id}>
+                      <div className="col-6 col-md-4 col-lg-3" key={product.id}>
                         <a href={`/product/${product.slug}`} style={{
                           background:'#fff', borderRadius:'16px',
                           boxShadow:'0 4px 20px rgba(0,0,0,0.06)',
@@ -651,7 +667,7 @@ export default function ProductsPage() {
                           {/* Content — flex grow so all cards same height */}
                           <div style={{ padding:'12px 16px 16px', display:'flex', flexDirection:'column', flex:1 }}>
                             {brandName && <BrandLogo logoUrl={logoUrl} brandName={brandName} />}
-                            <h3 style={{ fontSize:'14px', fontFamily:'Magistral-Medium', marginBottom:'auto', paddingBottom:'10px', color:'var(--text)', fontWeight:'normal', lineHeight:1.4, flex:1 }}>
+                            <h3 style={{ fontSize:'12px', fontFamily:'Magistral-Medium', marginBottom:'auto', paddingBottom:'10px', color:'var(--text)', fontWeight:'normal', lineHeight:1.4, flex:1 }}>
                               {product.name}
                             </h3>
                             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:'8px' }}>
