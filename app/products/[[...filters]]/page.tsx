@@ -1,23 +1,28 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 
-// ── Brand logo cache ─────────────────────────────────────────────────────────
+// ── Brand logo — simple img tag, URL passed as prop ──────────────────────────
+function BrandLogo({ logoUrl, brandName }: { logoUrl: string | null; brandName: string }) {
+  if (!logoUrl) return null;
+  return <img src={logoUrl} alt={brandName} style={{ height: '30px', width: 'auto', objectFit: 'contain', marginBottom: '12px' }} />;
+}
+
+// Fetch all brand logos once, cache globally
 const brandLogoCache: Record<string, string | null> = {};
-function BrandLogo({ brandName }: { brandName: string }) {
-  const [logo, setLogo] = useState<string | null>(null);
-  useEffect(() => {
-    if (!brandName) return;
-    if (brandName in brandLogoCache) { setLogo(brandLogoCache[brandName]); return; }
-    fetch(`/api/brand-logo?name=${encodeURIComponent(brandName)}`)
-      .then(r => r.json())
-      .then(d => { brandLogoCache[brandName] = d.logoUrl; setLogo(d.logoUrl); });
-  }, [brandName]);
-  if (!logo) return null;
-  return <img src={logo} alt={brandName} style={{ height: '30px', width: 'auto', objectFit: 'contain', marginBottom: '8px' }} />;
+async function fetchBrandLogo(brandName: string): Promise<string | null> {
+  if (brandName in brandLogoCache) return brandLogoCache[brandName];
+  try {
+    const res = await fetch(`/api/brand-logo?name=${encodeURIComponent(brandName)}`);
+    const d = await res.json();
+    brandLogoCache[brandName] = d.logoUrl || null;
+  } catch {
+    brandLogoCache[brandName] = null;
+  }
+  return brandLogoCache[brandName];
 }
 
 // ── Skeleton ─────────────────────────────────────────────────────────────────
@@ -69,8 +74,9 @@ function buildPriceSlug(min: number | null, max: number | null, globalMin: numbe
 }
 
 // ── URL builder ──────────────────────────────────────────────────────────────
-function buildURL(brandSlug: string, modelSlug: string, sizeSlug: string, priceSlug: string): string {
+function buildURL(brandSlug: string, modelSlug: string, sizeSlug: string, priceSlug: string, page = 1): string {
   const parts = [brandSlug, modelSlug, sizeSlug, priceSlug].filter(Boolean);
+  if (page > 1) parts.push(`page-${page}`);
   return parts.length ? `/products/${parts.join('/')}` : '/products';
 }
 
@@ -192,7 +198,6 @@ function RangeSlider({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function ProductsPage() {
-  const router = useRouter();
   const params = useParams();
   const segments: string[] = (params?.filters as string[]) || [];
 
@@ -201,6 +206,7 @@ export default function ProductsPage() {
   const [modelTerms, setModelTerms] = useState<Term[]>([]);
   const [sizeTerms,  setSizeTerms]  = useState<Term[]>([]);
   const [termsReady, setTermsReady] = useState(false);
+  const [segmentsResolved, setSegmentsResolved] = useState(false);
 
   // Global price range from WooCommerce
   const [globalMin, setGlobalMin] = useState(0);
@@ -223,7 +229,8 @@ export default function ProductsPage() {
   const [loading,    setLoading]    = useState(true);
   const [totalPages, setTotalPages] = useState(1);
   const [total,      setTotal]      = useState(0);
-  const [page,       setPage]       = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [logoMap, setLogoMap]       = useState<Record<string, string | null>>({});
 
   // Search
 
@@ -262,16 +269,19 @@ export default function ProductsPage() {
   useEffect(() => {
     if (!termsReady) return;
 
+    setSegmentsResolved(false); // reset while resolving
+
     let rBrand = '', rModel = '', rSize = '';
     let rMin: number | null = null, rMax: number | null = null;
+    let rPage = 1;
 
     for (const seg of segments) {
+      const pageMatch = seg.match(/^page-(\d+)$/);
+      if (pageMatch) { rPage = parseInt(pageMatch[1]); continue; }
+
       const price = parsePriceSlug(seg);
-      if (price) {
-        rMin = price.min;
-        rMax = price.max;
-        continue;
-      }
+      if (price) { rMin = price.min; rMax = price.max; continue; }
+
       const type = detectSlugType(seg, brandTerms, modelTerms, sizeTerms);
       if (type === 'brand' && !rBrand) rBrand = seg;
       if (type === 'model' && !rModel) rModel = seg;
@@ -283,11 +293,10 @@ export default function ProductsPage() {
     setSizeSlug(rSize);
     setActiveMin(rMin);
     setActiveMax(rMax);
-
-    // Sync slider to URL values
+    setCurrentPage(rPage);
     setSliderMin(rMin ?? globalMin);
     setSliderMax(rMax ?? globalMax);
-    setPage(1);
+    setSegmentsResolved(true); // ✅ now fetch can fire
   }, [segments.join('/'), termsReady]); // eslint-disable-line
 
   // ── Reload model terms when brand changes ───────────────────────────────
@@ -303,7 +312,9 @@ export default function ProductsPage() {
 
   // ── Fetch products ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (!termsReady) return;
+    if (!segmentsResolved) return;
+
+    const controller = new AbortController();
     setLoading(true);
 
     const brandTerm = brandTerms.find(t => t.slug === brandSlug);
@@ -312,24 +323,39 @@ export default function ProductsPage() {
 
     if ((brandSlug && !brandTerm) || (modelSlug && !modelTerm) || (sizeSlug && !sizeTerm)) return;
 
-    const api = new URLSearchParams({ per_page: '12', page: String(page) });
+    const fetchPerPage = '16';
+    const api = new URLSearchParams({ per_page: fetchPerPage, page: String(currentPage) });
     if (brandTerm) api.set('brand_term', String(brandTerm.id));
     if (modelTerm) api.set('model_term', String(modelTerm.id));
     if (sizeTerm)  api.set('size_term',  String(sizeTerm.id));
     if (activeMin !== null) api.set('min_price', String(activeMin));
     if (activeMax !== null) api.set('max_price', String(activeMax));
 
-
-    fetch(`/api/products?${api}`)
+    fetch(`/api/products?${api}`, { signal: controller.signal })
       .then(r => r.json())
       .then(data => {
-        setProducts(data.products || []);
+        const raw: any[] = data.products || [];
+        // Deduplicate by ID only
+        const seenIds = new Set<number>();
+        const unique = raw.filter(p => { if (seenIds.has(p.id)) return false; seenIds.add(p.id); return true; });
+        setProducts(unique);
         setTotalPages(Number(data.totalPages));
         setTotal(Number(data.total));
         setLoading(false);
+
+        // Batch fetch logos for unique brands
+        const uniqueBrands = [...new Set(unique.map((p: any) =>
+          p.attributes?.find((a: any) => a.slug === 'pa_wheel-brand')?.options?.[0]
+        ).filter(Boolean))] as string[];
+
+        Promise.all(uniqueBrands.map(b => fetchBrandLogo(b))).then(() => {
+          setLogoMap({ ...brandLogoCache });
+        });
       })
-      .catch(() => setLoading(false));
-  }, [brandSlug, modelSlug, sizeSlug, activeMin, activeMax, page, termsReady, brandTerms, modelTerms, sizeTerms]); // eslint-disable-line
+      .catch(err => { if (err.name !== 'AbortError') setLoading(false); });
+
+    return () => controller.abort();
+  }, [brandSlug, modelSlug, sizeSlug, activeMin, activeMax, currentPage, segmentsResolved]); // eslint-disable-line
 
   // ── Dynamic SEO titles ───────────────────────────────────────────────────
   const brandName  = brandTerms.find(t => t.slug === brandSlug)?.name  || '';
@@ -345,13 +371,16 @@ export default function ProductsPage() {
 
   // H1 — short, keyword-first
   const h1 = (() => {
-    if (brandName && modelName && sizeName) return { pre: '', highlight: `${brandName} ${modelName}`, post: `${sizeName} Wheels` };
-    if (brandName && modelName)             return { pre: '', highlight: `${brandName} ${modelName}`, post: 'Wheels' };
-    if (brandName && sizeName)              return { pre: '', highlight: `${brandName}`, post: `${sizeName} Wheels` };
+    const price = priceLabel ? ` ${priceLabel}` : '';
+    if (brandName && modelName && sizeName) return { pre: '', highlight: `${brandName} ${modelName}`, post: `${sizeName} Wheels${price}` };
+    if (brandName && modelName)             return { pre: '', highlight: `${brandName} ${modelName}`, post: `Wheels${price}` };
+    if (brandName && sizeName)              return { pre: '', highlight: brandName, post: `${sizeName} Wheels${price}` };
+    if (brandName && priceLabel)            return { pre: '', highlight: brandName, post: `Wheels ${priceLabel}` };
     if (brandName)                          return { pre: 'Shop', highlight: brandName, post: 'Wheels' };
-    if (sizeName && modelName)              return { pre: '', highlight: modelName, post: `${sizeName} Wheels` };
+    if (sizeName && priceLabel)             return { pre: '', highlight: sizeName, post: `Wheels ${priceLabel}` };
     if (sizeName)                           return { pre: '', highlight: sizeName, post: 'Wheels' };
-    if (modelName)                          return { pre: '', highlight: modelName, post: 'Wheels' };
+    if (modelName)                          return { pre: '', highlight: modelName, post: `Wheels${price}` };
+    if (priceLabel)                         return { pre: 'Wheels', highlight: priceLabel, post: '' };
     return { pre: 'Browse Our', highlight: 'Wheels', post: '' };
   })();
 
@@ -426,8 +455,8 @@ export default function ProductsPage() {
     const newModel = attr === 'brand' ? '' : attr === 'model' ? slug : modelSlug;
     const newSize  = attr === 'size'  ? slug : sizeSlug;
     const priceSlug = buildPriceSlug(activeMin, activeMax, globalMin, globalMax);
-    router.push(buildURL(newBrand, newModel, newSize, priceSlug));
-  }, [brandSlug, modelSlug, sizeSlug, activeMin, activeMax, globalMin, globalMax, router]);
+    window.location.href = buildURL(newBrand, newModel, newSize, priceSlug);
+  }, [brandSlug, modelSlug, sizeSlug, activeMin, activeMax, globalMin, globalMax]);
 
   const applyPrice = useCallback(() => {
     const priceSlug = buildPriceSlug(
@@ -435,20 +464,19 @@ export default function ProductsPage() {
       sliderMax < globalMax ? sliderMax : null,
       globalMin, globalMax,
     );
-    router.push(buildURL(brandSlug, modelSlug, sizeSlug, priceSlug));
-  }, [sliderMin, sliderMax, globalMin, globalMax, brandSlug, modelSlug, sizeSlug, router]);
+    window.location.href = buildURL(brandSlug, modelSlug, sizeSlug, priceSlug);
+  }, [sliderMin, sliderMax, globalMin, globalMax, brandSlug, modelSlug, sizeSlug]);
 
   const clearPrice = useCallback(() => {
     setSliderMin(globalMin);
     setSliderMax(globalMax);
-    router.push(buildURL(brandSlug, modelSlug, sizeSlug, ''));
-  }, [globalMin, globalMax, brandSlug, modelSlug, sizeSlug, router]);
+    window.location.href = buildURL(brandSlug, modelSlug, sizeSlug, '');
+  }, [globalMin, globalMax, brandSlug, modelSlug, sizeSlug]);
 
   const clearFilters = useCallback(() => {
     setSliderMin(globalMin); setSliderMax(globalMax);
-    setPage(1);
-    router.push('/products');
-  }, [globalMin, globalMax, router]);
+    window.location.href = '/products';
+  }, [globalMin, globalMax]);
 
   const hasFilters = brandSlug || modelSlug || sizeSlug || activeMin !== null || activeMax !== null;
   const hasPriceFilter = activeMin !== null || activeMax !== null;
@@ -600,23 +628,34 @@ export default function ProductsPage() {
                   <button onClick={clearFilters} className="btn-grad" style={{ marginTop:'16px' }}>Clear Filters</button>
                 </div>
               ) : (
-                <div className="row g-4">
+                <div className="row g-4 align-items-stretch">
                   {products.map((product: any) => {
                     const brandAttr = product.attributes?.find((a:any) => a.slug === 'pa_wheel-brand');
                     const brandName = brandAttr?.options?.[0] || '';
+                    const logoUrl   = logoMap[brandName] ?? null;
                     return (
                       <div className="col-6 col-md-4 col-lg-4" key={product.id}>
-                        <a href={`/product/${product.slug}`} style={{ background:'#fff', borderRadius:'16px', boxShadow:'0 4px 20px rgba(0,0,0,0.06)', textDecoration:'none', color:'inherit', display:'block', overflow:'hidden' }}>
-                          <div style={{ width:'100%', height:'200px', background:'#fff', display:'flex', alignItems:'center', justifyContent:'center', padding:'10px' }}>
+                        <a href={`/product/${product.slug}`} style={{
+                          background:'#fff', borderRadius:'16px',
+                          boxShadow:'0 4px 20px rgba(0,0,0,0.06)',
+                          textDecoration:'none', color:'inherit',
+                          display:'flex', flexDirection:'column',
+                          height:'100%', overflow:'hidden',
+                        }}>
+                          {/* Image — fixed height */}
+                          <div style={{ width:'100%', height:'180px', background:'#fff', display:'flex', alignItems:'center', justifyContent:'center', padding:'10px', flexShrink:0 }}>
                             {product.images?.[0]?.src
                               ? <img src={product.images[0].src} alt={product.name} style={{ width:'100%', height:'100%', objectFit:'contain' }} />
                               : <i className="bi bi-image" style={{ fontSize:'2rem', color:'rgba(236,93,6,0.5)' }} />}
                           </div>
-                          <div style={{ padding:'16px' }}>
-                            {brandName && <BrandLogo brandName={brandName} />}
-                            <h3 style={{ fontSize:'13px', fontFamily:'Magistral-Medium', marginBottom:'8px', color:'var(--text)', fontWeight:'normal', lineHeight:1.4 }}>{product.name}</h3>
-                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                              <span style={{ fontSize:'16px', color:'var(--orange)', fontFamily:'Magistral-Medium' }}>${product.price}</span>
+                          {/* Content — flex grow so all cards same height */}
+                          <div style={{ padding:'12px 16px 16px', display:'flex', flexDirection:'column', flex:1 }}>
+                            {brandName && <BrandLogo logoUrl={logoUrl} brandName={brandName} />}
+                            <h3 style={{ fontSize:'14px', fontFamily:'Magistral-Medium', marginBottom:'auto', paddingBottom:'10px', color:'var(--text)', fontWeight:'normal', lineHeight:1.4, flex:1 }}>
+                              {product.name}
+                            </h3>
+                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:'8px' }}>
+                              <span style={{ fontSize:'15px', color:'var(--orange)', fontFamily:'Magistral-Medium' }}>${product.price}</span>
                               {product.on_sale && <span style={{ fontSize:'11px', background:'var(--orange)', color:'#fff', padding:'2px 8px', borderRadius:'4px' }}>SALE</span>}
                             </div>
                           </div>
@@ -629,11 +668,31 @@ export default function ProductsPage() {
 
               {totalPages > 1 && !loading && (
                 <div style={{ display:'flex', justifyContent:'center', gap:'10px', marginTop:'40px' }}>
-                  <button onClick={() => setPage(p => Math.max(1,p-1))} disabled={page===1} className="btn-grad" style={{ opacity:page===1?0.5:1 }}>
+                  <button
+                    onClick={() => {
+                      const priceSlug = buildPriceSlug(activeMin, activeMax, globalMin, globalMax);
+                      window.location.href = buildURL(brandSlug, modelSlug, sizeSlug, priceSlug, currentPage - 1);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    disabled={currentPage === 1}
+                    className="btn-grad"
+                    style={{ opacity: currentPage === 1 ? 0.5 : 1 }}
+                  >
                     <i className="bi bi-arrow-left" /> Prev
                   </button>
-                  <span style={{ padding:'12px 20px', background:'#fff', borderRadius:'8px', fontFamily:'Magistral-Medium' }}>{page} / {totalPages}</span>
-                  <button onClick={() => setPage(p => Math.min(totalPages,p+1))} disabled={page===totalPages} className="btn-grad" style={{ opacity:page===totalPages?0.5:1 }}>
+                  <span style={{ padding:'12px 20px', background:'#fff', borderRadius:'8px', fontFamily:'Magistral-Medium' }}>
+                    {currentPage} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => {
+                      const priceSlug = buildPriceSlug(activeMin, activeMax, globalMin, globalMax);
+                      window.location.href = buildURL(brandSlug, modelSlug, sizeSlug, priceSlug, currentPage + 1);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    disabled={currentPage === totalPages}
+                    className="btn-grad"
+                    style={{ opacity: currentPage === totalPages ? 0.5 : 1 }}
+                  >
                     Next <i className="bi bi-arrow-right" />
                   </button>
                 </div>

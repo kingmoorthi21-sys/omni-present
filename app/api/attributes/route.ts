@@ -7,23 +7,25 @@ const WC_SECRET = process.env.WC_SECRET;
 const base = () => `${WC_URL}/wp-json/wc/v3`;
 const auth = () => `consumer_key=${WC_KEY}&consumer_secret=${WC_SECRET}`;
 
+// Cache attribute terms for 1 hour — they rarely change
+export const revalidate = 3600;
+
 async function getAllTerms(attributeId: string) {
   const res = await fetch(
     `${base()}/products/attributes/${attributeId}/terms?${auth()}&per_page=100&orderby=name`,
-    { cache: 'no-store' }
+    { next: { revalidate: 3600 } }
   );
   return res.json();
 }
 
 async function getRelatedModelTerms(brandTermId: string, allModelTerms: any[]) {
-  // Brand products la irukka all model names collect pannuvom
   const modelNames = new Set<string>();
   let page = 1;
 
   while (true) {
     const res = await fetch(
       `${base()}/products?${auth()}&attribute=pa_wheel-brand&attribute_term=${brandTermId}&per_page=100&page=${page}&_fields=attributes`,
-      { cache: 'no-store' }
+      { next: { revalidate: 1800 } } // 30 min cache
     );
     const products = await res.json();
     if (!products?.length) break;
@@ -38,7 +40,6 @@ async function getRelatedModelTerms(brandTermId: string, allModelTerms: any[]) {
     page++;
   }
 
-  // allModelTerms la irundhu match pannuvom
   return allModelTerms.filter((t: any) => modelNames.has(t.name));
 }
 
@@ -51,7 +52,6 @@ export async function GET(request: Request) {
 
   const allTerms = await getAllTerms(attributeId);
 
-  // Model terms + brand filter
   if (attributeId === '13' && brandTermId) {
     const filtered = await getRelatedModelTerms(brandTermId, allTerms);
     return NextResponse.json(filtered);
