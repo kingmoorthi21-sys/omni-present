@@ -398,7 +398,7 @@ export default function ProductsPage() {
     if (sizeName)                           return { pre: '', highlight: sizeName, post: 'Wheels' };
     if (modelName)                          return { pre: '', highlight: modelName, post: `Wheels${price}` };
     if (priceLabel)                         return { pre: 'Wheels', highlight: priceLabel, post: '' };
-    return { pre: 'Browse Our', highlight: 'Wheels', post: '' };
+    return { pre: 'Shop Our', highlight: 'Wheels', post: '' };
   })();
 
   // Meta title — under 60 chars, keyword-rich
